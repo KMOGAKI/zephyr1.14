@@ -269,7 +269,7 @@ static uint32_t m_ep_ready;
  * Mask prepared USBD data for transmission.
  * It is cleared when no more data to transmit left.
  */
-static uint32_t m_ep_dma_waiting;
+static atomic_t m_ep_dma_waiting;
 
 /**
  * @brief Current EasyDMA state.
@@ -757,11 +757,13 @@ static inline void usbd_dma_start(nrfx_usbd_ep_t ep)
 
 void nrfx_usbd_isoinconfig_set(nrf_usbd_isoinconfig_t config)
 {
+    NRFX_ASSERT(!nrfx_usbd_errata_type_52840_eng_a());
     nrf_usbd_isoinconfig_set(config);
 }
 
 nrf_usbd_isoinconfig_t nrfx_usbd_isoinconfig_get(void)
 {
+    NRFX_ASSERT(!nrfx_usbd_errata_type_52840_eng_a());
     return nrf_usbd_isoinconfig_get();
 }
 
@@ -852,7 +854,7 @@ void nrfx_usbd_ep_abort(nrfx_usbd_ep_t ep)
  */
 static void usbd_ep_abort_all(void)
 {
-    uint32_t ep_waiting = m_ep_dma_waiting | (m_ep_ready & NRFX_USBD_EPOUT_BIT_MASK);
+    atomic_t ep_waiting = m_ep_dma_waiting | (m_ep_ready & NRFX_USBD_EPOUT_BIT_MASK);
     while (0 != ep_waiting)
     {
         uint8_t bitpos = __CLZ(__RBIT(ep_waiting));
@@ -1659,6 +1661,12 @@ void nrfx_usbd_irq_handler(void)
 
 nrfx_err_t nrfx_usbd_init(nrfx_usbd_event_handler_t event_handler)
 {
+    NRFX_ASSERT((nrfx_usbd_errata_type_52840_eng_a() ||
+                 nrfx_usbd_errata_type_52840_eng_b() ||
+                 nrfx_usbd_errata_type_52840_eng_c() ||
+                 nrfx_usbd_errata_type_52840_eng_d())
+               );
+
     NRFX_ASSERT(event_handler);
 
     if (m_drv_state != NRFX_DRV_STATE_UNINITIALIZED)
@@ -1913,6 +1921,20 @@ bool nrfx_usbd_suspend(void)
             else
             {
                 suspended = true;
+
+                if (nrfx_usbd_errata_171())
+                {
+                    if (*((volatile uint32_t *)(0x4006EC00)) == 0x00000000)
+                    {
+                        *((volatile uint32_t *)(0x4006EC00)) = 0x00009375;
+                        *((volatile uint32_t *)(0x4006EC14)) = 0x00000000;
+                        *((volatile uint32_t *)(0x4006EC00)) = 0x00009375;
+                    }
+                    else
+                    {
+                        *((volatile uint32_t *)(0x4006EC14)) = 0x00000000;
+                    }
+                }
             }
         }
     }

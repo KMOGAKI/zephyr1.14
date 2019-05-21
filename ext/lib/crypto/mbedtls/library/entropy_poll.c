@@ -51,8 +51,8 @@
 
 #if !defined(unix) && !defined(__unix__) && !defined(__unix) && \
     !defined(__APPLE__) && !defined(_WIN32) && !defined(__QNXNTO__) && \
-    !defined(__HAIKU__)
-#error "Platform entropy sources only work on Unix and Windows, see MBEDTLS_NO_PLATFORM_ENTROPY in config.h"
+    !defined(__HAIKU__) && !defined(__ZEPHYR__)
+#error "Platform entropy sources only work on Unix, Zephyr and Windows, see MBEDTLS_NO_PLATFORM_ENTROPY in config.h"
 #endif
 
 #if defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)
@@ -89,6 +89,33 @@ int mbedtls_platform_entropy_poll( void *data, unsigned char *output, size_t len
 }
 #else /* _WIN32 && !EFIX64 && !EFI32 */
 
+#if defined(__ZEPHYR__)
+
+#include <entropy.h>
+
+int mbedtls_platform_entropy_poll( void *data,
+                           unsigned char *output, size_t len, size_t *olen )
+{
+    struct device *dev;
+    int ret;
+    ((void) data);
+
+    *olen = len;
+
+    dev = device_get_binding(CONFIG_ENTROPY_NAME);
+    if (!dev)
+        return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+
+    ret = entropy_get_entropy_isr(dev, output, len, ENTROPY_BUSYWAIT);
+    if (ret < 0)
+        return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+
+    *olen = ret;
+
+    return 0;
+}
+
+#else
 /*
  * Test for Linux getrandom() support.
  * Since there is no wrapper in the libc yet, use the generic syscall wrapper
@@ -156,6 +183,7 @@ int mbedtls_platform_entropy_poll( void *data,
 
     return( 0 );
 }
+#endif /* __ZEPHYR__ */
 #endif /* _WIN32 && !EFIX64 && !EFI32 */
 #endif /* !MBEDTLS_NO_PLATFORM_ENTROPY */
 
