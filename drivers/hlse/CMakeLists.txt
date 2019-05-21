@@ -1,0 +1,71 @@
+add_definitions(
+	-DTGT_A71CH
+	-DI2C
+	-DNO_SECURE_CHANNEL_SUPPORT
+	-DSCP_MODE=NO_C_MAC_NO_C_ENC_NO_R_MAC_NO_R_ENC
+	-DMBEDTLS_CONFIG_FILE="${CONFIG_MBEDTLS_CFG_FILE}"
+	-DPLATFORM_IMX
+	)
+
+zephyr_include_directories(
+	ax
+	common
+	inc
+	mbedtls
+	platform
+	tst
+	)
+
+zephyr_library()
+
+zephyr_library_include_directories(
+        ${ZEPHYR_BASE}/ext/lib/crypto/mbedtls/configs
+        ${ZEPHYR_BASE}/ext/lib/crypto/mbedtls/include
+        )
+
+zephyr_library_sources(
+	ax/A71HLSEWrapper.c
+	ax/a71ch_com.c
+	ax/a71ch_crypto_derive.c
+	ax/a71ch_crypto_ecc.c
+	ax/a71ch_module.c
+	ax/a71ch_sst.c
+	ax/ax_crypto_aes_key.c
+	ax/ax_crypto_ecc.c
+	ax/ax_crypto_rng.c
+	ax/ax_scp.c
+	ax/ax_sst.c
+	ax/ax_switch.c
+	ax/ax_util.c
+	common/a71_debug.c
+	common/axHostCryptombedtls.c
+	common/global_platf.c
+	common/hcAsn.c
+	common/nxLog.c
+	common/sci2c.c
+	common/scp.c
+	common/smCom.c
+	common/smComSCI2C.c
+	common/sm_apdu.c
+	common/sm_errors.c
+	platform/app_boot.c
+	platform/i2c_a7.c
+	platform/sm_printf.c
+	platform/sm_timer.c
+	src/HostCryptoAPImbedtls.c
+	tst/hkdf_mbedtls.c
+	tst/tst_a71ch_util.c
+	tst/tstHostCrypto_mbedtls.c
+	tst/tst_sm_time.c
+	tst/tst_sm_util.c
+	)
+
+zephyr_library_sources_ifdef(
+	CONFIG_HLSE_MBEDTLS_ALT
+	mbedtls/ax_mbedtls.c
+	mbedtls/ecdh_alt_ax.c
+	mbedtls/ecdh_alt.c
+	mbedtls/ecp_alt_ax.c
+	mbedtls/ecp_alt.c
+	mbedtls/ecp_curves_alt.c
+	)

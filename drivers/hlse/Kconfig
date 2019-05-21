@@ -1,0 +1,14 @@
+# Kconfig - Host Library Secure Element configuration options
+#
+#
+# Copyright (c) 2019 Atmark Techno, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+menuconfig HLSE
+	bool "Host Library Secure Element for A71CH"
+
+menuconfig HLSE_MBEDTLS_ALT
+	bool "Use alternative cryptography engine for mbed TLS [Experimental]"
+	depends on HLSE
