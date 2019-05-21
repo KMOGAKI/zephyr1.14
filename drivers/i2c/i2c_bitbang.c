@@ -74,6 +74,13 @@ int i2c_bitbang_configure(struct i2c_bitbang *context, u32_t dev_config)
 static void i2c_set_scl(struct i2c_bitbang *context, int state)
 {
 	context->io->set_scl(context->io_context, state);
+	/* This hw knows how to read the clock line, so we wait
+	 * until it actually gets high.  This is safer as some
+	 * chips may hold it low ("clock stretching") while they
+	 * are processing data internally.
+	 */
+	if (state)
+		while (!context->io->get_scl(context->io_context));
 }
 
 static void i2c_set_sda(struct i2c_bitbang *context, int state)
@@ -97,38 +104,29 @@ static void i2c_delay(unsigned int cycles_to_wait)
 
 static void i2c_start(struct i2c_bitbang *context)
 {
-	if (!i2c_get_sda(context)) {
-		/*
-		 * SDA is already low, so we need to do something to make it
-		 * high. Try pulsing clock low to get slave to release SDA.
-		 */
-		i2c_set_scl(context, 0);
-		i2c_delay(context->delays[T_LOW]);
-		i2c_set_scl(context, 1);
-		i2c_delay(context->delays[T_SU_STA]);
-	}
+	/* assert: scl, sda are high */
 	i2c_set_sda(context, 0);
 	i2c_delay(context->delays[T_HD_STA]);
+	i2c_set_scl(context, 0);
+	i2c_delay(context->delays[T_LOW]);
 }
 
 static void i2c_repeated_start(struct i2c_bitbang *context)
 {
+	/* assert: scl is low */
+	i2c_set_sda(context, 1);
+	i2c_delay(context->delays[T_HIGH]);
+	i2c_set_scl(context, 1);
 	i2c_delay(context->delays[T_SU_STA]);
 	i2c_start(context);
 }
 
 static void i2c_stop(struct i2c_bitbang *context)
 {
-	if (i2c_get_sda(context)) {
-		/*
-		 * SDA is already high, so we need to make it low so that
-		 * we can create a rising edge. This means we're effectively
-		 * doing a START.
-		 */
-		i2c_delay(context->delays[T_SU_STA]);
-		i2c_set_sda(context, 0);
-		i2c_delay(context->delays[T_HD_STA]);
-	}
+	/* assert: scl is low */
+	i2c_set_sda(context, 0);
+	i2c_delay(context->delays[T_LOW]);
+	i2c_set_scl(context, 1);
 	i2c_delay(context->delays[T_SU_STP]);
 	i2c_set_sda(context, 1);
 	i2c_delay(context->delays[T_BUF]); /* In case we start again too soon */
@@ -136,24 +134,26 @@ static void i2c_stop(struct i2c_bitbang *context)
 
 static void i2c_write_bit(struct i2c_bitbang *context, int bit)
 {
-	i2c_set_scl(context, 0);
-	/* SDA hold time is zero, so no need for a delay here */
+	/* assert: scl is low */
 	i2c_set_sda(context, bit);
 	i2c_delay(context->delays[T_LOW]);
 	i2c_set_scl(context, 1);
-	i2c_delay(context->delays[T_HIGH]);
+	i2c_delay(context->delays[T_HIGH] * 2);
+	i2c_set_scl(context, 0);
+	i2c_delay(context->delays[T_LOW]);
 }
 
 static bool i2c_read_bit(struct i2c_bitbang *context)
 {
 	bool bit;
 
-	i2c_set_scl(context, 0);
-	/* SDA hold time is zero, so no need for a delay here */
+	/* assert: scl is low */
 	i2c_set_sda(context, 1); /* Stop driving low, so slave has control */
 	i2c_delay(context->delays[T_LOW]);
-	bit = i2c_get_sda(context);
 	i2c_set_scl(context, 1);
+	i2c_delay(context->delays[T_HIGH] * 2);
+	bit = i2c_get_sda(context);
+	i2c_set_scl(context, 0);
 	i2c_delay(context->delays[T_HIGH]);
 	return bit;
 }
@@ -189,46 +189,29 @@ int i2c_bitbang_transfer(struct i2c_bitbang *context,
 	u8_t *buf, *buf_end;
 	unsigned int flags;
 	int result = -EIO;
+	int i;
 
 	if (!num_msgs) {
 		return 0;
 	}
 
-	/* We want an initial Start condition */
-	flags = I2C_MSG_RESTART;
-
 	/* Make sure we're in a good state so slave recognises the Start */
 	i2c_set_scl(context, 1);
-	flags |= I2C_MSG_STOP;
 
-	do {
-		/* Stop flag from previous message? */
-		if (flags & I2C_MSG_STOP) {
-			i2c_stop(context);
-		}
-
-		/* Forget old flags except start flag */
-		flags &= I2C_MSG_RESTART;
-
-		/* Start condition? */
-		if (flags & I2C_MSG_RESTART) {
-			i2c_start(context);
-		} else if (msgs->flags & I2C_MSG_RESTART) {
-			i2c_repeated_start(context);
-		}
+	i2c_start(context);
+	for (i = 0; i < num_msgs; i++) {
+		unsigned int byte0 = slave_address << 1;
 
 		/* Get flags for new message */
-		flags |= msgs->flags;
+		flags = msgs->flags;
+
+		if (i)
+			i2c_repeated_start(context);
 
 		/* Send address after any Start condition */
-		if (flags & I2C_MSG_RESTART) {
-			unsigned int byte0 = slave_address << 1;
-
-			byte0 |= (flags & I2C_MSG_RW_MASK) == I2C_MSG_READ;
-			if (!i2c_write_byte(context, byte0)) {
-				goto finish; /* No ACK received */
-			}
-			flags &= ~I2C_MSG_RESTART;
+		byte0 |= (flags & I2C_MSG_RW_MASK) == I2C_MSG_READ;
+		if (!i2c_write_byte(context, byte0)) {
+			goto finish; /* No ACK received */
 		}
 
 		/* Transfer data */
@@ -236,6 +219,18 @@ int i2c_bitbang_transfer(struct i2c_bitbang *context,
 		buf_end = buf + msgs->len;
 		if ((flags & I2C_MSG_RW_MASK) == I2C_MSG_READ) {
 			/* Read */
+			/* Some SMBus transactions require that we receive the
+			   transaction length as the first read byte. */
+			if ((buf == msgs->buf) && (flags & I2C_MSG_RECV_LEN)) {
+				*buf++ = i2c_read_byte(context);
+				if (*(msgs->buf) > I2C_SMBUS_BLOCK_MAX) {
+					result = -EPROTO;
+					goto finish; /* invalid block length */
+				}
+				msgs->len = *(msgs->buf);
+				buf_end = buf + msgs->len;
+				i2c_write_bit(context, buf == buf_end);
+			}
 			while (buf < buf_end) {
 				*buf++ = i2c_read_byte(context);
 				/* ACK the byte, except for the last one */
@@ -252,8 +247,7 @@ int i2c_bitbang_transfer(struct i2c_bitbang *context,
 
 		/* Next message */
 		msgs++;
-		num_msgs--;
-	} while (num_msgs);
+	}
 
 	/* Complete without error */
 	result = 0;

@@ -45,14 +45,33 @@ static void i2c_gpio_set_scl(void *io_context, int state)
 {
 	struct i2c_gpio_context *context = io_context;
 
-	gpio_pin_write(context->gpio, context->scl_pin, state);
+	if (state)
+		gpio_pin_configure(context->gpio, context->scl_pin, GPIO_DIR_IN);
+	else {
+		gpio_pin_write(context->gpio, context->scl_pin, 0);
+		gpio_pin_configure(context->gpio, context->scl_pin, GPIO_DIR_OUT);
+	}
 }
 
 static void i2c_gpio_set_sda(void *io_context, int state)
 {
 	struct i2c_gpio_context *context = io_context;
 
-	gpio_pin_write(context->gpio, context->sda_pin, state);
+	if (state)
+		gpio_pin_configure(context->gpio, context->sda_pin, GPIO_DIR_IN);
+	else {
+		gpio_pin_write(context->gpio, context->sda_pin, 0);
+		gpio_pin_configure(context->gpio, context->sda_pin, GPIO_DIR_OUT);
+	}
+}
+
+static int i2c_gpio_get_scl(void *io_context)
+{
+	struct i2c_gpio_context *context = io_context;
+	u32_t state = 1U;
+
+	gpio_pin_read(context->gpio, context->scl_pin, &state);
+	return state;
 }
 
 static int i2c_gpio_get_sda(void *io_context)
@@ -67,6 +86,7 @@ static int i2c_gpio_get_sda(void *io_context)
 static const struct i2c_bitbang_io io_fns = {
 	.set_scl = &i2c_gpio_set_scl,
 	.set_sda = &i2c_gpio_set_sda,
+	.get_scl = &i2c_gpio_get_scl,
 	.get_sda = &i2c_gpio_get_sda,
 };
 
@@ -102,6 +122,9 @@ static int i2c_gpio_init(struct device *dev)
 	}
 	context->sda_pin = config->sda_pin;
 	context->scl_pin = config->scl_pin;
+
+	gpio_pin_configure(context->gpio, context->sda_pin, GPIO_DIR_IN);
+	gpio_pin_configure(context->gpio, context->scl_pin, GPIO_DIR_IN);
 
 	i2c_bitbang_init(&context->bitbang, &io_fns, context);
 
