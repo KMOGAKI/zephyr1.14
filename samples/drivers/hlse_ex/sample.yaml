@@ -1,0 +1,7 @@
+sample:
+  name: Example for A71CH (HLSE)
+tests:
+  test:
+    platform_whitelist: degu_evk
+    tags: drivers
+    depends_on: hlse
