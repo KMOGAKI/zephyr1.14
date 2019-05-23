@@ -184,8 +184,8 @@ static int MemoryFaultIsRecoverable(NANO_ESF *esf)
 		u32_t start = (u32_t)exceptions[i].start & ~0x1;
 		u32_t end = (u32_t)exceptions[i].end & ~0x1;
 
-		if (esf->pc >= start && esf->pc < end) {
-			esf->pc = (u32_t)(exceptions[i].fixup);
+		if (esf->basic.pc >= start && esf->basic.pc < end) {
+			esf->basic.pc = (u32_t)(exceptions[i].fixup);
 			return 1;
 		}
 	}
@@ -737,7 +737,7 @@ static void SecureStackDump(const NANO_ESF *secure_esf)
 		 */
 		top_of_sec_stack += ADDITIONAL_STATE_CONTEXT_WORDS;
 		secure_esf = (const NANO_ESF *)top_of_sec_stack;
-		sec_ret_addr = secure_esf->pc;
+		sec_ret_addr = secure_esf->basic.pc;
 	} else {
 		/* Exception during Non-Secure function call.
 		 * The return address is located on top of stack.

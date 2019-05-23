@@ -371,6 +371,21 @@ int zsock_setsockopt(int sock, int level, int optname,
 		     const void *optval, socklen_t optlen);
 
 /**
+ * @brief Get socket name
+ *
+ * @details
+ * @rststar
+ * See `POSIX.1-2017 article
+ * <http://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockname.html>`__
+ * for normative description.
+ * This function is also exposed as ``getsockname()``
+ * if :option:`CONFIG_NET_SOCKETS_POSIX_NAMES` is defined.
+ * @endrststar
+ */
+__syscall int zsock_getsockname(int sock, struct sockaddr *addr,
+				socklen_t *addrlen);
+
+/**
  * @brief Get local host name
  *
  * @details
@@ -498,6 +513,13 @@ const char *zsock_gai_strerror(int errcode);
 /** zsock_getnameinfo(): Dummy option for compatibility */
 #define NI_DGRAM 16
 
+/* POSIX extensions */
+
+/** zsock_getnameinfo(): Max supported hostname length */
+#ifndef NI_MAXHOST
+#define NI_MAXHOST 64
+#endif
+
 /**
  * @brief Resolve a network address to a domain name or ASCII address
  *
@@ -596,6 +618,12 @@ static inline int setsockopt(int sock, int level, int optname,
 			     const void *optval, socklen_t optlen)
 {
 	return zsock_setsockopt(sock, level, optname, optval, optlen);
+}
+
+static inline int getsockname(int sock, struct sockaddr *addr,
+			      socklen_t *addrlen)
+{
+	return zsock_getsockname(sock, addr, addrlen);
 }
 
 static inline int getaddrinfo(const char *host, const char *service,
@@ -711,6 +739,30 @@ static inline char *inet_ntop(sa_family_t family, const void *src, char *dst,
 /* Socket options for IPPROTO_IPV6 level */
 /** sockopt: Don't support IPv4 access (ignored, for compatibility) */
 #define IPV6_V6ONLY 26
+
+/** @cond INTERNAL_HIDDEN */
+/**
+ * @brief Registration information for a given BSD socket family.
+ */
+struct net_socket_register {
+	int family;
+	bool (*is_supported)(int family, int type, int proto);
+	int (*handler)(int family, int type, int proto);
+};
+
+#define NET_SOCKET_GET_NAME(socket_name)	\
+	(__net_socket_register_##socket_name)
+
+#define NET_SOCKET_REGISTER(socket_name, _family, _is_supported, _handler) \
+	static const struct net_socket_register				\
+			(NET_SOCKET_GET_NAME(socket_name)) __used	\
+	__attribute__((__section__(".net_socket_register.init"))) = {	\
+		.family = _family,					\
+		.is_supported = _is_supported,				\
+		.handler = _handler,					\
+	}
+
+/** @endcond */
 
 #ifdef __cplusplus
 }

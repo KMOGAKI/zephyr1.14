@@ -1310,7 +1310,7 @@ static void wncm14a2a_modem_reset(void)
 	int ret = 0, retry_count = 0, counter = 0;
 
 	/* bring down network interface */
-	atomic_clear_bit(ictx.iface->if_dev->flags, NET_IF_UP);
+	net_if_flag_clear(ictx.iface, NET_IF_UP);
 
 restart:
 	/* stop RSSI delay work */
@@ -1426,7 +1426,7 @@ static int wncm14a2a_init(struct device *dev)
 	ARG_UNUSED(dev);
 
 	/* check for valid pinconfig */
-	__ASSERT(sizeof(pinconfig) == MAX_MDM_CONTROL_PINS,
+	__ASSERT(ARRAY_SIZE(pinconfig) == MAX_MDM_CONTROL_PINS,
 	       "Incorrect modem pinconfig!");
 
 	(void)memset(&ictx, 0, sizeof(ictx));
@@ -1680,9 +1680,10 @@ static int offload_sendto(struct net_pkt *pkt,
 	ret = send_data(sock, pkt);
 	if (ret < 0) {
 		LOG_ERR("send_data error: %d", ret);
+	} else {
+		net_pkt_unref(pkt);
 	}
 
-	net_pkt_unref(pkt);
 	if (cb) {
 		cb(context, ret, user_data);
 	}

@@ -47,6 +47,10 @@
 void z_NanoFatalErrorHandler(unsigned int reason,
 					  const NANO_ESF *pEsf)
 {
+#ifdef CONFIG_THREAD_NAME
+	const char *thread_name = k_thread_name_get(k_current_get());
+#endif
+
 	LOG_PANIC();
 
 	switch (reason) {
@@ -77,9 +81,17 @@ void z_NanoFatalErrorHandler(unsigned int reason,
 		printk("**** Unknown Fatal Error %d! ****\n", reason);
 		break;
 	}
-	printk("Current thread ID = %p\n"
+	printk("Current thread ID = %p"
+#ifdef CONFIG_THREAD_NAME
+	       " (%s)"
+#endif
+	       "\n"
 	       "Faulting instruction address = 0x%x\n",
-	       k_current_get(), pEsf->pc);
+	       k_current_get(),
+#ifdef CONFIG_THREAD_NAME
+	       thread_name ? thread_name : "unknown",
+#endif
+		   pEsf->basic.pc);
 
 	/*
 	 * Now that the error has been reported, call the user implemented
@@ -94,7 +106,7 @@ void z_NanoFatalErrorHandler(unsigned int reason,
 
 void z_do_kernel_oops(const NANO_ESF *esf)
 {
-	z_NanoFatalErrorHandler(esf->r0, esf);
+	z_NanoFatalErrorHandler(esf->basic.r0, esf);
 }
 
 FUNC_NORETURN void z_arch_syscall_oops(void *ssf_ptr)
@@ -104,7 +116,7 @@ FUNC_NORETURN void z_arch_syscall_oops(void *ssf_ptr)
 
 	LOG_PANIC();
 
-	oops_esf.pc = ssf_contents[3];
+	oops_esf.basic.pc = ssf_contents[3];
 
 	z_do_kernel_oops(&oops_esf);
 	CODE_UNREACHABLE;

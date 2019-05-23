@@ -40,6 +40,7 @@ static ALWAYS_INLINE void kernel_arch_init(void)
 	z_ExcSetup();
 	z_FaultInit();
 	z_CpuIdleInit();
+	z_clearfaults();
 }
 
 static ALWAYS_INLINE void
@@ -47,6 +48,19 @@ z_arch_switch_to_main_thread(struct k_thread *main_thread,
 			    k_thread_stack_t *main_stack,
 			    size_t main_stack_size, k_thread_entry_t _main)
 {
+#if defined(CONFIG_FLOAT)
+	/* Initialize the Floating Point Status and Control Register when in
+	 * Unshared FP Registers mode (In Shared FP Registers mode, FPSCR is
+	 * initialized at thread creation for threads that make use of the FP).
+	 */
+	__set_FPSCR(0);
+#if defined(CONFIG_FP_SHARING)
+	/* In Sharing mode clearing FPSCR may set the CONTROL.FPCA flag. */
+	__set_CONTROL(__get_CONTROL() & (~(CONTROL_FPCA_Msk)));
+	__ISB();
+#endif /* CONFIG_FP_SHARING */
+#endif /* CONFIG_FLOAT */
+
 #ifdef CONFIG_ARM_MPU
 	/* Configure static memory map. This will program MPU regions,
 	 * to set up access permissions for fixed memory sections, such
@@ -69,7 +83,7 @@ z_arch_switch_to_main_thread(struct k_thread *main_thread,
 	start_of_main_stack =
 		Z_THREAD_STACK_BUFFER(main_stack) + main_stack_size;
 #endif
-	start_of_main_stack = (void *)STACK_ROUND_DOWN(start_of_main_stack);
+	start_of_main_stack = (char *)STACK_ROUND_DOWN(start_of_main_stack);
 
 #ifdef CONFIG_TRACING
 	z_sys_trace_thread_switched_out();

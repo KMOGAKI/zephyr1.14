@@ -7,6 +7,7 @@
 
 #include <kernel.h>
 #include <string.h>
+#include <misc/math_extras.h>
 #include <misc/printk.h>
 #include <misc/rb.h>
 #include <kernel_structs.h>
@@ -50,8 +51,6 @@ static struct k_spinlock lists_lock;       /* kobj rbtree/dlist */
 static struct k_spinlock objfree_lock;     /* k_object_free */
 #endif
 static struct k_spinlock obj_lock;         /* kobj struct data */
-static struct k_spinlock ucopy_lock;       /* copy to/from userspace */
-static struct k_spinlock ucopy_outer_lock; /* code that calls copies */
 
 #define MAX_THREAD_BITS		(CONFIG_MAX_THREAD_BYTES * 8)
 
@@ -629,7 +628,6 @@ void z_object_uninit(void *obj)
 void *z_user_alloc_from_copy(const void *src, size_t size)
 {
 	void *dst = NULL;
-	k_spinlock_key_t key = k_spin_lock(&ucopy_lock);
 
 	/* Does the caller in user mode have access to read this memory? */
 	if (Z_SYSCALL_MEMORY_READ(src, size)) {
@@ -644,14 +642,12 @@ void *z_user_alloc_from_copy(const void *src, size_t size)
 
 	(void)memcpy(dst, src, size);
 out_err:
-	k_spin_unlock(&ucopy_lock, key);
 	return dst;
 }
 
 static int user_copy(void *dst, const void *src, size_t size, bool to_user)
 {
 	int ret = EFAULT;
-	k_spinlock_key_t key = k_spin_lock(&ucopy_lock);
 
 	/* Does the caller in user mode have access to this memory? */
 	if (to_user ? Z_SYSCALL_MEMORY_WRITE(dst, size) :
@@ -662,7 +658,6 @@ static int user_copy(void *dst, const void *src, size_t size, bool to_user)
 	(void)memcpy(dst, src, size);
 	ret = 0;
 out_err:
-	k_spin_unlock(&ucopy_lock, key);
 	return ret;
 }
 
@@ -678,10 +673,9 @@ int z_user_to_copy(void *dst, const void *src, size_t size)
 
 char *z_user_string_alloc_copy(const char *src, size_t maxlen)
 {
-	unsigned long actual_len;
+	size_t actual_len;
 	int err;
 	char *ret = NULL;
-	k_spinlock_key_t key = k_spin_lock(&ucopy_outer_lock);
 
 	actual_len = z_user_string_nlen(src, maxlen, &err);
 	if (err != 0) {
@@ -689,25 +683,31 @@ char *z_user_string_alloc_copy(const char *src, size_t maxlen)
 	}
 	if (actual_len == maxlen) {
 		/* Not NULL terminated */
-		printk("string too long %p (%lu)\n", src, actual_len);
+		printk("string too long %p (%zu)\n", src, actual_len);
 		goto out;
 	}
-	if (__builtin_uaddl_overflow(actual_len, 1, &actual_len)) {
+	if (size_add_overflow(actual_len, 1, &actual_len)) {
 		printk("overflow\n");
 		goto out;
 	}
 
 	ret = z_user_alloc_from_copy(src, actual_len);
+
+	/* Someone may have modified the source string during the above
+	 * checks. Ensure what we actually copied is still terminated
+	 * properly.
+	 */
+	if (ret != NULL) {
+		ret[actual_len - 1] = '\0';
+	}
 out:
-	k_spin_unlock(&ucopy_outer_lock, key);
 	return ret;
 }
 
 int z_user_string_copy(char *dst, const char *src, size_t maxlen)
 {
-	unsigned long actual_len;
+	size_t actual_len;
 	int ret, err;
-	k_spinlock_key_t key = k_spin_lock(&ucopy_outer_lock);
 
 	actual_len = z_user_string_nlen(src, maxlen, &err);
 	if (err != 0) {
@@ -716,19 +716,21 @@ int z_user_string_copy(char *dst, const char *src, size_t maxlen)
 	}
 	if (actual_len == maxlen) {
 		/* Not NULL terminated */
-		printk("string too long %p (%lu)\n", src, actual_len);
+		printk("string too long %p (%zu)\n", src, actual_len);
 		ret = EINVAL;
 		goto out;
 	}
-	if (__builtin_uaddl_overflow(actual_len, 1, &actual_len)) {
+	if (size_add_overflow(actual_len, 1, &actual_len)) {
 		printk("overflow\n");
 		ret = EINVAL;
 		goto out;
 	}
 
 	ret = z_user_from_copy(dst, src, actual_len);
+
+	/* See comment above in z_user_string_alloc_copy() */
+	dst[actual_len - 1] = '\0';
 out:
-	k_spin_unlock(&ucopy_outer_lock, key);
 	return ret;
 }
 

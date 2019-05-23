@@ -167,7 +167,7 @@ static int prepare_cb(struct lll_prepare_param *prepare_param)
 
 	radio_isr_set(isr_rx, lll);
 
-	radio_tmr_tifs_set(TIFS_US);
+	radio_tmr_tifs_set(EVENT_IFS_US);
 	radio_switch_complete_and_tx(0, 0, 0, 0);
 
 #if defined(CONFIG_BT_CTLR_PRIVACY)
@@ -432,7 +432,7 @@ static void isr_tx(void *param)
 	LL_ASSERT(node_rx);
 
 	radio_isr_set(isr_rx, param);
-	radio_tmr_tifs_set(TIFS_US);
+	radio_tmr_tifs_set(EVENT_IFS_US);
 	radio_switch_complete_and_tx(0, 0, 0, 0);
 	radio_pkt_rx_set(node_rx->pdu);
 
@@ -448,7 +448,7 @@ static void isr_tx(void *param)
 #endif /* CONFIG_BT_CTLR_PRIVACY */
 
 	/* +/- 2us active clock jitter, +1 us hcto compensation */
-	hcto = radio_tmr_tifs_base_get() + TIFS_US + 4 + 1;
+	hcto = radio_tmr_tifs_base_get() + EVENT_IFS_US + 4 + 1;
 	hcto += radio_rx_chain_delay_get(0, 0);
 	hcto += addr_us_get(0);
 	hcto -= radio_tx_chain_delay_get(0, 0);
@@ -459,7 +459,7 @@ static void isr_tx(void *param)
 
 #if defined(CONFIG_BT_CTLR_GPIO_LNA_PIN)
 	radio_gpio_lna_setup();
-	radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + TIFS_US - 4 -
+	radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + EVENT_IFS_US - 4 -
 				 radio_tx_chain_delay_get(0, 0) -
 				 CONFIG_BT_CTLR_GPIO_LNA_OFFSET);
 #endif /* CONFIG_BT_CTLR_GPIO_LNA_PIN */
@@ -487,7 +487,7 @@ static void isr_done(void *param)
 	node_rx = ull_pdu_rx_alloc_peek(1);
 	LL_ASSERT(node_rx);
 
-	radio_tmr_tifs_set(TIFS_US);
+	radio_tmr_tifs_set(EVENT_IFS_US);
 	radio_switch_complete_and_tx(0, 0, 0, 0);
 	radio_pkt_rx_set(node_rx->pdu);
 	radio_rssi_measure();
@@ -746,7 +746,8 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 #endif /* CONFIG_BT_CTLR_PROFILE_ISR */
 
 		radio_gpio_pa_setup();
-		radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + TIFS_US -
+		radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() +
+					 EVENT_IFS_US -
 					 radio_rx_chain_delay_get(0, 0) -
 					 CONFIG_BT_CTLR_GPIO_PA_OFFSET);
 #endif /* CONFIG_BT_CTLR_GPIO_PA_PIN */
@@ -767,10 +768,7 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 		rx->hdr.type = NODE_RX_TYPE_CONNECTION;
 		rx->hdr.handle = 0xffff;
 
-		ftr = (void *)((u8_t *)rx->pdu +
-			       (offsetof(struct pdu_adv, connect_ind) +
-			       sizeof(struct pdu_adv_connect_ind)));
-
+		ftr = &(rx->hdr.rx_ftr);
 		ftr->param = lll;
 		ftr->ticks_anchor = radio_tmr_start_get();
 		ftr->us_radio_end = conn_space_us -
@@ -837,7 +835,7 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 		lll->state = 1U;
 		radio_isr_set(isr_tx, lll);
 
-		radio_tmr_tifs_set(TIFS_US);
+		radio_tmr_tifs_set(EVENT_IFS_US);
 		radio_switch_complete_and_rx(0);
 		radio_pkt_tx_set(pdu_tx);
 
@@ -860,7 +858,8 @@ static inline u32_t isr_rx_pdu(struct lll_scan *lll, u8_t devmatch_ok,
 #endif /* CONFIG_BT_CTLR_PROFILE_ISR */
 
 		radio_gpio_pa_setup();
-		radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() + TIFS_US -
+		radio_gpio_pa_lna_enable(radio_tmr_tifs_base_get() +
+					 EVENT_IFS_US -
 					 radio_rx_chain_delay_get(0, 0) -
 					 CONFIG_BT_CTLR_GPIO_PA_OFFSET);
 #endif /* CONFIG_BT_CTLR_GPIO_PA_PIN */
@@ -1033,8 +1032,8 @@ static u32_t isr_rx_scan_report(struct lll_scan *lll, u8_t rssi_ready,
 	}
 
 	pdu_adv_rx = (void *)node_rx->pdu;
-	extra = &((u8_t *)pdu_adv_rx)[offsetof(struct pdu_adv, payload) +
-				      pdu_adv_rx->len];
+	extra = (u8_t *)&(node_rx->hdr.rx_ftr.param);
+
 	/* save the RSSI value */
 	*extra = (rssi_ready) ? (radio_rssi_get() & 0x7f) : 0x7f;
 	extra += PDU_AC_SIZE_RSSI;

@@ -150,7 +150,7 @@ static bool net_if_tx(struct net_if *iface, struct net_pkt *pkt)
 	dst = net_pkt_lladdr_dst(pkt);
 	context = net_pkt_context(pkt);
 
-	if (atomic_test_bit(iface->if_dev->flags, NET_IF_UP)) {
+	if (net_if_flag_is_set(iface, NET_IF_UP)) {
 		if (IS_ENABLED(CONFIG_NET_TCP) &&
 		    net_pkt_family(pkt) != AF_UNSPEC) {
 			net_pkt_set_sent(pkt, true);
@@ -217,7 +217,10 @@ static inline void init_iface(struct net_if *iface)
 {
 	const struct net_if_api *api = net_if_get_device(iface)->driver_api;
 
-	NET_ASSERT(api && api->init);
+	if (!api || !api->init) {
+		NET_ERR("Iface %p driver API init NULL", iface);
+		return;
+	}
 
 	NET_DBG("On iface %p", iface);
 
@@ -231,7 +234,7 @@ enum net_verdict net_if_send_data(struct net_if *iface, struct net_pkt *pkt)
 	enum net_verdict verdict = NET_OK;
 	int status = -EIO;
 
-	if (!atomic_test_bit(iface->if_dev->flags, NET_IF_UP)) {
+	if (!net_if_flag_is_set(iface, NET_IF_UP)) {
 		/* Drop packet if interface is not up */
 		NET_WARN("iface %p is down", iface);
 		verdict = NET_DROP;
@@ -244,7 +247,7 @@ enum net_verdict net_if_send_data(struct net_if *iface, struct net_pkt *pkt)
 	 * Workaround Linux bug, see:
 	 * https://github.com/zephyrproject-rtos/zephyr/issues/3111
 	 */
-	if (!atomic_test_bit(iface->if_dev->flags, NET_IF_POINTOPOINT) &&
+	if (!net_if_flag_is_set(iface, NET_IF_POINTOPOINT) &&
 	    !net_pkt_lladdr_src(pkt)->addr) {
 		net_pkt_lladdr_src(pkt)->addr = net_pkt_lladdr_if(pkt)->addr;
 		net_pkt_lladdr_src(pkt)->len = net_pkt_lladdr_if(pkt)->len;
@@ -953,31 +956,6 @@ static inline void net_if_addr_init(struct net_if_addr *ifaddr,
 	} else {
 		ifaddr->is_infinite = true;
 	}
-}
-
-static inline struct in6_addr *check_global_addr(struct net_if *iface)
-{
-	struct net_if_ipv6 *ipv6 = iface->config.ip.ipv6;
-	int i;
-
-	if (!ipv6) {
-		return NULL;
-	}
-
-	for (i = 0; i < NET_IF_MAX_IPV6_ADDR; i++) {
-		if (!ipv6->unicast[i].is_used ||
-		    (ipv6->unicast[i].addr_state != NET_ADDR_TENTATIVE &&
-		     ipv6->unicast[i].addr_state != NET_ADDR_PREFERRED) ||
-		    ipv6->unicast[i].address.family != AF_INET6) {
-			continue;
-		}
-
-		if (!net_ipv6_is_ll_addr(&ipv6->unicast[i].address.in6_addr)) {
-			return &ipv6->unicast[i].address.in6_addr;
-		}
-	}
-
-	return NULL;
 }
 
 static void join_mcast_nodes(struct net_if *iface, struct in6_addr *addr)
@@ -1887,7 +1865,35 @@ struct in6_addr *net_if_ipv6_get_ll_addr(enum net_addr_state state,
 	return NULL;
 }
 
-struct in6_addr *net_if_ipv6_get_global_addr(struct net_if **iface)
+#if defined(CONFIG_NET_IPV6)
+static inline struct in6_addr *check_global_addr(struct net_if *iface,
+						 enum net_addr_state state)
+{
+	struct net_if_ipv6 *ipv6 = iface->config.ip.ipv6;
+	int i;
+
+	if (!ipv6) {
+		return NULL;
+	}
+
+	for (i = 0; i < NET_IF_MAX_IPV6_ADDR; i++) {
+		if (!ipv6->unicast[i].is_used ||
+		    (ipv6->unicast[i].addr_state != state) ||
+		    ipv6->unicast[i].address.family != AF_INET6) {
+			continue;
+		}
+
+		if (!net_ipv6_is_ll_addr(&ipv6->unicast[i].address.in6_addr)) {
+			return &ipv6->unicast[i].address.in6_addr;
+		}
+	}
+
+	return NULL;
+}
+#endif
+
+struct in6_addr *net_if_ipv6_get_global_addr(enum net_addr_state state,
+					     struct net_if **iface)
 {
 #if defined(CONFIG_NET_IPV6)
 	struct net_if *tmp;
@@ -1899,7 +1905,7 @@ struct in6_addr *net_if_ipv6_get_global_addr(struct net_if **iface)
 			continue;
 		}
 
-		addr = check_global_addr(tmp);
+		addr = check_global_addr(tmp, state);
 		if (addr) {
 			if (iface) {
 				*iface = tmp;
@@ -2326,10 +2332,10 @@ static struct in_addr *net_if_ipv4_get_best_match(struct net_if *iface,
 }
 #endif /* CONFIG_NET_IPV4 */
 
-struct in_addr *net_if_ipv4_get_ll(struct net_if *iface,
-				   enum net_addr_state addr_state)
-{
 #if defined(CONFIG_NET_IPV4)
+static struct in_addr *if_ipv4_get_addr(struct net_if *iface,
+					enum net_addr_state addr_state, bool ll)
+{
 	struct net_if_ipv4 *ipv4 = iface->config.ip.ipv4;
 	int i;
 
@@ -2346,12 +2352,34 @@ struct in_addr *net_if_ipv4_get_ll(struct net_if *iface,
 		}
 
 		if (net_ipv4_is_ll_addr(&ipv4->unicast[i].address.in_addr)) {
-			return &ipv4->unicast[i].address.in_addr;
+			if (!ll) {
+				continue;
+			}
+		} else {
+			if (ll) {
+				continue;
+			}
 		}
+
+		return &ipv4->unicast[i].address.in_addr;
 	}
-#endif
 
 	return NULL;
+}
+#else
+#define if_ipv4_get_addr(...) NULL
+#endif
+
+struct in_addr *net_if_ipv4_get_ll(struct net_if *iface,
+				   enum net_addr_state addr_state)
+{
+	return if_ipv4_get_addr(iface, addr_state, true);
+}
+
+struct in_addr *net_if_ipv4_get_global_addr(struct net_if *iface,
+					    enum net_addr_state addr_state)
+{
+	return if_ipv4_get_addr(iface, addr_state, false);
 }
 
 const struct in_addr *net_if_ipv4_select_src_addr(struct net_if *dst_iface,
@@ -2401,6 +2429,12 @@ const struct in_addr *net_if_ipv4_select_src_addr(struct net_if *dst_iface,
 	}
 
 	if (!src) {
+		src = net_if_ipv4_get_global_addr(dst_iface,
+						  NET_ADDR_PREFERRED);
+		if (src) {
+			return src;
+		}
+
 		return net_ipv4_unspecified_address();
 	}
 
@@ -2839,15 +2873,14 @@ int net_if_up(struct net_if *iface)
 
 	NET_DBG("iface %p", iface);
 
-	if (atomic_test_bit(iface->if_dev->flags, NET_IF_UP)) {
+	if (net_if_flag_is_set(iface, NET_IF_UP)) {
 		return 0;
 	}
 
-#if defined(CONFIG_NET_OFFLOAD)
-	if (net_if_is_ip_offloaded(iface)) {
-		goto done;
+	if (IS_ENABLED(CONFIG_NET_OFFLOAD) && net_if_is_ip_offloaded(iface)) {
+		net_if_flag_set(iface, NET_IF_UP);
+		goto exit;
 	}
-#endif
 
 	/* If the L2 does not support enable just set the flag */
 	if (!net_if_l2(iface)->enable) {
@@ -2866,7 +2899,7 @@ done:
 	 */
 	NET_ASSERT(net_if_get_link_addr(iface)->addr != NULL);
 
-	atomic_set_bit(iface->if_dev->flags, NET_IF_UP);
+	net_if_flag_set(iface, NET_IF_UP);
 
 #if defined(CONFIG_NET_IPV6_DAD)
 	NET_DBG("Starting DAD for iface %p", iface);
@@ -2885,6 +2918,7 @@ done:
 	net_ipv4_autoconf_start(iface);
 #endif
 
+exit:
 	net_mgmt_event_notify(NET_EVENT_IF_UP, iface);
 
 	return 0;
@@ -2894,7 +2928,7 @@ void net_if_carrier_down(struct net_if *iface)
 {
 	NET_DBG("iface %p", iface);
 
-	atomic_clear_bit(iface->if_dev->flags, NET_IF_UP);
+	net_if_flag_clear(iface, NET_IF_UP);
 
 #if defined(CONFIG_NET_IPV4_AUTO)
 	net_ipv4_autoconf_reset(iface);
@@ -2929,7 +2963,7 @@ int net_if_down(struct net_if *iface)
 	}
 
 done:
-	atomic_clear_bit(iface->if_dev->flags, NET_IF_UP);
+	net_if_flag_clear(iface, NET_IF_UP);
 
 	net_mgmt_event_notify(NET_EVENT_IF_DOWN, iface);
 
@@ -2974,7 +3008,7 @@ int net_if_set_promisc(struct net_if *iface)
 		return ret;
 	}
 
-	ret = atomic_test_and_set_bit(iface->if_dev->flags, NET_IF_PROMISC);
+	ret = net_if_flag_test_and_set(iface, NET_IF_PROMISC);
 	if (ret) {
 		return -EALREADY;
 	}
@@ -2991,14 +3025,14 @@ void net_if_unset_promisc(struct net_if *iface)
 		return;
 	}
 
-	atomic_clear_bit(iface->if_dev->flags, NET_IF_PROMISC);
+	net_if_flag_clear(iface, NET_IF_PROMISC);
 }
 
 bool net_if_is_promisc(struct net_if *iface)
 {
 	NET_ASSERT(iface);
 
-	return atomic_test_bit(iface->if_dev->flags, NET_IF_PROMISC);
+	return net_if_flag_is_set(iface, NET_IF_PROMISC);
 }
 
 #if defined(CONFIG_NET_PKT_TIMESTAMP)
@@ -3154,6 +3188,8 @@ void net_if_post_init(void)
 
 	/* After TX is running, attempt to bring the interface up */
 	for (iface = __net_if_start; iface != __net_if_end; iface++) {
-		net_if_up(iface);
+		if (!net_if_flag_is_set(iface, NET_IF_NO_AUTO_START)) {
+			net_if_up(iface);
+		}
 	}
 }

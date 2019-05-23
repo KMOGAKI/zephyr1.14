@@ -60,9 +60,11 @@ int net_icmpv4_finalize(struct net_pkt *pkt)
 }
 
 static enum net_verdict icmpv4_handle_echo_request(struct net_pkt *pkt,
-						   struct net_ipv4_hdr *ip_hdr)
+						   struct net_ipv4_hdr *ip_hdr,
+						   struct net_icmp_hdr *icmp_hdr)
 {
 	struct net_pkt *reply = NULL;
+	const struct in_addr *src;
 	s16_t payload_len;
 
 	/* If interface can not select src address based on dst addr
@@ -92,7 +94,14 @@ static enum net_verdict icmpv4_handle_echo_request(struct net_pkt *pkt,
 		goto drop;
 	}
 
-	if (net_ipv4_create(reply, &ip_hdr->dst, &ip_hdr->src) ||
+	if (net_ipv4_is_addr_mcast(&ip_hdr->dst)) {
+		src = net_if_ipv4_select_src_addr(net_pkt_iface(pkt),
+						  &ip_hdr->dst);
+	} else {
+		src = &ip_hdr->dst;
+	}
+
+	if (net_ipv4_create(reply, src, &ip_hdr->src) ||
 	    icmpv4_create(reply, NET_ICMPV4_ECHO_REPLY, 0) ||
 	    net_pkt_copy(reply, pkt, payload_len)) {
 		NET_DBG("DROP: wrong buffer");
@@ -103,7 +112,7 @@ static enum net_verdict icmpv4_handle_echo_request(struct net_pkt *pkt,
 	net_ipv4_finalize(reply, IPPROTO_ICMP);
 
 	NET_DBG("Sending Echo Reply from %s to %s",
-		log_strdup(net_sprint_ipv4_addr(&ip_hdr->dst)),
+		log_strdup(net_sprint_ipv4_addr(src)),
 		log_strdup(net_sprint_ipv4_addr(&ip_hdr->src)));
 
 	if (net_send_data(reply) < 0) {
@@ -128,7 +137,9 @@ drop:
 int net_icmpv4_send_echo_request(struct net_if *iface,
 				 struct in_addr *dst,
 				 u16_t identifier,
-				 u16_t sequence)
+				 u16_t sequence,
+				 const void *data,
+				 size_t data_size)
 {
 	NET_PKT_DATA_ACCESS_CONTIGUOUS_DEFINE(icmpv4_access,
 					      struct net_icmpv4_echo_req);
@@ -145,7 +156,8 @@ int net_icmpv4_send_echo_request(struct net_if *iface,
 	src = &iface->config.ip.ipv4->unicast[0].address.in_addr;
 
 	pkt = net_pkt_alloc_with_buffer(iface,
-					sizeof(struct net_icmpv4_echo_req),
+					sizeof(struct net_icmpv4_echo_req)
+					+ data_size,
 					AF_INET, IPPROTO_ICMP,
 					PKT_WAIT_TIME);
 	if (!pkt) {
@@ -167,6 +179,7 @@ int net_icmpv4_send_echo_request(struct net_if *iface,
 	echo_req->sequence   = htons(sequence);
 
 	net_pkt_set_data(pkt, &icmpv4_access);
+	net_pkt_write(pkt, data, data_size);
 
 	net_pkt_cursor_init(pkt);
 
@@ -319,7 +332,7 @@ enum net_verdict net_icmpv4_input(struct net_pkt *pkt,
 	SYS_SLIST_FOR_EACH_CONTAINER(&handlers, cb, node) {
 		if (cb->type == icmp_hdr->type &&
 		    (cb->code == icmp_hdr->code || cb->code == 0U)) {
-			return cb->handler(pkt, ip_hdr);
+			return cb->handler(pkt, ip_hdr, icmp_hdr);
 		}
 	}
 

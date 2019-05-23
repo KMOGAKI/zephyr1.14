@@ -514,8 +514,6 @@ struct k_thread {
 	struct _thread_base base;
 
 	/** defined by the architecture, but all archs need these */
-	struct _caller_saved caller_saved;
-	/** defined by the architecture, but all archs need these */
 	struct _callee_saved callee_saved;
 
 	/** static thread init data */
@@ -792,16 +790,30 @@ void k_thread_system_pool_assign(struct k_thread *thread);
 /**
  * @brief Put the current thread to sleep.
  *
- * This routine puts the current thread to sleep for @a duration
- * milliseconds.
+ * This routine puts the current thread to sleep for @a duration milliseconds.
  *
- * @param duration Number of milliseconds to sleep.
+ * @param ms Number of milliseconds to sleep.
  *
  * @return Zero if the requested time has elapsed or the number of milliseconds
  * left to sleep, if thread was woken up by \ref k_wakeup call.
- *
  */
-__syscall s32_t k_sleep(s32_t duration);
+__syscall s32_t k_sleep(s32_t ms);
+
+/**
+ * @brief Put the current thread to sleep with microsecond resolution.
+ *
+ * This function is unlikely to work as expected without kernel tuning.
+ * In particular, because the lower bound on the duration of a sleep is
+ * the duration of a tick, CONFIG_SYS_CLOCK_TICKS_PER_SEC must be adjusted
+ * to achieve the resolution desired. The implications of doing this must
+ * be understood before attempting to use k_usleep(). Use with caution.
+ *
+ * @param us Number of microseconds to sleep.
+ *
+ * @return Zero if the requested time has elapsed or the number of microseconds
+ * left to sleep, if thread was woken up by \ref k_wakeup call.
+ */
+__syscall s32_t k_usleep(s32_t us);
 
 /**
  * @brief Cause the current thread to busy wait.
@@ -4430,6 +4442,10 @@ __syscall void k_poll_signal_check(struct k_poll_signal *signal,
  * k_poll_signal_reset(). It thus has to be reset by the user before being
  * passed again to k_poll() or k_poll() will consider it being signaled, and
  * will return immediately.
+ *
+ * @note The result is stored and the 'signaled' field is set even if
+ * this function returns an error indicating that an expiring poll was
+ * not notified.  The next k_poll() will detect the missed raise.
  *
  * @param signal A poll signal.
  * @param result The value to store in the result field of the signal.

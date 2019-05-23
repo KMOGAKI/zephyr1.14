@@ -48,7 +48,11 @@ build:
         else
           ./scripts/ci/run_ci.sh -s -b ${BRANCH} -r origin -m ${MATRIX_BUILD} -M ${MATRIX_BUILDS};
         fi;
-
+branches:
+  only:
+    - master
+    - v*-branch
+    - topic-*
 integrations:
   notifications:
     - integrationName: slack_integration
@@ -67,8 +71,6 @@ integrations:
       branches:
         only:
           - master
-          - net
-          - bluetooth
-          - arm
       on_success: never
-      on_failure: never
+      on_failure: always
+      on_pull_request: never

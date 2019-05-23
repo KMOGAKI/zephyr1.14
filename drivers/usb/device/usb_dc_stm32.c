@@ -427,7 +427,7 @@ int usb_dc_attach(void)
 	 * For STM32F0 series SoCs on QFN28 and TSSOP20 packages enable PIN
 	 * pair PA11/12 mapped instead of PA9/10 (e.g. stm32f070x6)
 	 */
-#if defined(CONFIG_SOC_SERIES_STM32F0X) && defined(SYSCFG_CFGR1_PA11_PA12_RMP)
+#if defined(DT_USB_ENABLE_PIN_REMAP)
 	if (LL_APB1_GRP2_IsEnabledClock(LL_APB1_GRP2_PERIPH_SYSCFG)) {
 		LL_SYSCFG_EnablePinRemap();
 	} else {
@@ -480,13 +480,11 @@ int usb_dc_ep_set_callback(const u8_t ep, const usb_dc_ep_callback cb)
 	return 0;
 }
 
-int usb_dc_set_status_callback(const usb_dc_status_callback cb)
+void usb_dc_set_status_callback(const usb_dc_status_callback cb)
 {
 	LOG_DBG("");
 
 	usb_dc_stm32_state.status_cb = cb;
-
-	return 0;
 }
 
 int usb_dc_set_address(const u8_t addr)
@@ -535,7 +533,7 @@ int usb_dc_ep_start_read(u8_t ep, u8_t *data, u32_t max_data_len)
 
 int usb_dc_ep_get_read_count(u8_t ep, u32_t *read_bytes)
 {
-	if (!EP_IS_OUT(ep)) {
+	if (!EP_IS_OUT(ep) || !read_bytes) {
 		LOG_ERR("invalid ep 0x%02x", ep);
 		return -EINVAL;
 	}
@@ -661,7 +659,7 @@ int usb_dc_ep_is_stalled(const u8_t ep, u8_t *const stalled)
 
 	LOG_DBG("ep 0x%02x", ep);
 
-	if (!ep_state) {
+	if (!ep_state || !stalled) {
 		return -EINVAL;
 	}
 
@@ -732,15 +730,15 @@ int usb_dc_ep_write(const u8_t ep, const u8_t *const data,
 
 	LOG_DBG("ep 0x%02x, len %u", ep, data_len);
 
-	if (!EP_IS_IN(ep)) {
+	if (!ep_state || !EP_IS_IN(ep)) {
 		LOG_ERR("invalid ep 0x%02x", ep);
 		return -EINVAL;
 	}
 
 	ret = k_sem_take(&ep_state->write_sem, K_NO_WAIT);
 	if (ret) {
-		LOG_ERR("Unable to write ep 0x%02x (%d)", ep, ret);
-		return ret;
+		LOG_ERR("Unable to get write lock (%d)", ret);
+		return -EAGAIN;
 	}
 
 	if (!k_is_in_isr()) {
@@ -824,7 +822,7 @@ int usb_dc_ep_read_continue(u8_t ep)
 {
 	struct usb_dc_stm32_ep_state *ep_state = usb_dc_stm32_get_ep_state(ep);
 
-	if (!EP_IS_OUT(ep)) { /* Check if OUT ep */
+	if (!ep_state || !EP_IS_OUT(ep)) { /* Check if OUT ep */
 		LOG_ERR("Not valid endpoint: %02x", ep);
 		return -EINVAL;
 	}
@@ -854,10 +852,31 @@ int usb_dc_ep_read(const u8_t ep, u8_t *const data, const u32_t max_data_len,
 	return 0;
 }
 
+int usb_dc_ep_halt(const u8_t ep)
+{
+	return usb_dc_ep_set_stall(ep);
+}
+
+int usb_dc_ep_flush(const u8_t ep)
+{
+	struct usb_dc_stm32_ep_state *ep_state = usb_dc_stm32_get_ep_state(ep);
+
+	if (!ep_state) {
+		return -EINVAL;
+	}
+
+	LOG_ERR("Not implemented");
+
+	return 0;
+}
 
 int usb_dc_ep_mps(const u8_t ep)
 {
 	struct usb_dc_stm32_ep_state *ep_state = usb_dc_stm32_get_ep_state(ep);
+
+	if (!ep_state) {
+		return -EINVAL;
+	}
 
 	return ep_state->ep_mps;
 }
@@ -880,11 +899,20 @@ int usb_dc_reset(void)
 
 void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
 {
+	int i;
+
 	LOG_DBG("");
 
 	HAL_PCD_EP_Open(&usb_dc_stm32_state.pcd, EP0_IN, EP0_MPS, EP_TYPE_CTRL);
 	HAL_PCD_EP_Open(&usb_dc_stm32_state.pcd, EP0_OUT, EP0_MPS,
 			EP_TYPE_CTRL);
+
+	/* The DataInCallback will never be called at this point for any pending
+	 * transactions. Reset the IN semaphores to prevent perpetual locked state.
+	 * */
+	for (i = 0; i < DT_USB_NUM_BIDIR_ENDPOINTS; i++) {
+		k_sem_give(&usb_dc_stm32_state.in_ep_state[i].write_sem);
+	}
 
 	if (usb_dc_stm32_state.status_cb) {
 		usb_dc_stm32_state.status_cb(USB_DC_RESET, NULL);

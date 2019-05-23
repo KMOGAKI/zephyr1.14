@@ -118,8 +118,9 @@ To undo the above change:
 Built-in Configuration Options
 ------------------------------
 
-The following table documents configuration options supported by west's built-in
-commands.
+The following table documents configuration options supported by west's
+built-in commands. Configuration options supported by Zephyr's extension
+commands are documented in the pages for those commands.
 
 .. NOTE: docs authors: keep this table sorted by section, then option.
 

@@ -1100,7 +1100,7 @@ static int tls_opt_dtls_role_set(struct net_context *context,
 	return 0;
 }
 
-int ztls_socket(int family, int type, int proto)
+static int ztls_socket(int family, int type, int proto)
 {
 	enum net_ip_protocol_secure tls_proto = 0;
 	int fd = z_reserve_fd();
@@ -1916,6 +1916,7 @@ static int tls_sock_ioctl_vmeth(void *obj, unsigned int request, va_list args)
 	/* fcntl() commands */
 	case F_GETFL:
 	case F_SETFL:
+	case ZFD_IOCTL_GETSOCKNAME:
 		/* Pass the call to the core socket implementation. */
 		return sock_fd_op_vtable.fd_vtable.ioctl(obj, request, args);
 
@@ -2017,3 +2018,16 @@ static const struct socket_op_vtable tls_sock_fd_op_vtable = {
 	.getsockopt = tls_sock_getsockopt_vmeth,
 	.setsockopt = tls_sock_setsockopt_vmeth,
 };
+
+static bool tls_is_supported(int family, int type, int proto)
+{
+	if ((family == AF_INET || family == AF_INET6) &&
+	    (((proto >= IPPROTO_TLS_1_0) && (proto <= IPPROTO_TLS_1_2)) ||
+	     (proto >= IPPROTO_DTLS_1_0 && proto <= IPPROTO_DTLS_1_2))) {
+		return true;
+	}
+
+	return false;
+}
+
+NET_SOCKET_REGISTER(tls, AF_UNSPEC, tls_is_supported, ztls_socket);

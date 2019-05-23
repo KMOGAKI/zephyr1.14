@@ -63,6 +63,7 @@ foreach(kconfig_target
     PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}
     srctree=${ZEPHYR_BASE}
     KERNELVERSION=${KERNELVERSION}
+    ZEPHYR_BASE=${ZEPHYR_BASE}
     KCONFIG_CONFIG=${DOTCONFIG}
     ARCH=$ENV{ARCH}
     BOARD_DIR=$ENV{BOARD_DIR}
@@ -111,6 +112,7 @@ set(
   merge_config_files
   ${BOARD_DEFCONFIG}
   ${CONF_FILE_AS_LIST}
+  ${shield_conf_files}
   ${OVERLAY_CONFIG_AS_LIST}
   ${EXTRA_KCONFIG_OPTIONS_FILE}
   ${config_files}

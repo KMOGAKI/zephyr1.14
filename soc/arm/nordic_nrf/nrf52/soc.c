@@ -29,6 +29,8 @@ extern void z_NmiInit(void);
 
 #if defined(CONFIG_SOC_NRF52810)
 #include <system_nrf52810.h>
+#elif defined(CONFIG_SOC_NRF52811)
+#include <system_nrf52811.h>
 #elif defined(CONFIG_SOC_NRF52832)
 #include <system_nrf52.h>
 #elif defined(CONFIG_SOC_NRF52840)
@@ -69,8 +71,6 @@ static int nordicsemi_nrf52_init(struct device *arg)
 	nrf_power_dcdcen_set(true);
 #endif
 
-	z_clearfaults();
-
 	/* Install default handler that simply resets the CPU
 	* if configured in the kernel, NOP otherwise
 	*/
@@ -79,6 +79,11 @@ static int nordicsemi_nrf52_init(struct device *arg)
 	irq_unlock(key);
 
 	return 0;
+}
+
+void z_arch_busy_wait(u32_t time_us)
+{
+	nrfx_coredep_delay_us(time_us);
 }
 
 SYS_INIT(nordicsemi_nrf52_init, PRE_KERNEL_1, 0);
