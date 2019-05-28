@@ -23,6 +23,7 @@
 #define _SCI2C_H_
 
 #include "sm_types.h"
+#include "atomic.h"
 
 #define SW_LENGTH                    (0x02) // ISO 7816-3 Status Word length = 2 bytes
 // #define APDU_HEADER_LENGTH           (5)
@@ -177,8 +178,8 @@ typedef struct
 eSci2c_Error_t sci2c_Init(U8 *SCI2Catr, U16 *SCI2CatrLen);
 U32 sci2c_Transceive(apdu_t * pApdu);
 U32 sci2c_TransceiveRaw(U8 * pTx, U16 txLen, U8 * pRx, U32 * pRxLen);
-void sci2c_SetSequenceCounter(U8 seqCounter);
-U8 sci2c_GetSequenceCounter(void);
+void sci2c_SetSequenceCounter(atomic_val_t seqCounter);
+atomic_val_t sci2c_GetSequenceCounter();
 void sci2c_TerminateI2C(U8 full);
 
 #endif //_SCI2C_H_

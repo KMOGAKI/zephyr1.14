@@ -56,7 +56,7 @@
 
 #define SCI2C_tFW_DEF_ms 600 // Waiting time extension is assumed to be 600 ms
 
-static U8 gSeqCtr = 0;
+static atomic_t gSeqCtr = 0;
 
 #ifdef TGT_A71CH
 static uint8_t rxData[270];
@@ -68,7 +68,7 @@ static uint8_t txData[1024];
 
 static uint8_t * pRx = rxData;
 
-static U8 GetCounter(void);
+static atomic_val_t GetCounter(void);
 static U8 sci2c_WaitForStatusOkay(U32 msec);
 static i2c_status_t sci2c_SendByte(sci2c_Data_t * pSci2cData);
 static i2c_status_t sci2c_WriteBlock(sci2c_Data_t * pSci2cData);
@@ -101,7 +101,7 @@ eSci2c_Error_t sci2c_Init(U8 *SCI2Catr, U16 *SCI2CatrLen)
 
 #define GET_STATUS_MAX 70
 
-    gSeqCtr = 0; /* (re)set sequence counter */
+    atomic_set(&gSeqCtr, 0); /* (re)set sequence counter */
 
     //   Keep on getting the status until the A7 is ready. Fetching the status
     // will implicitly wake up the A7, so no explicit wake-up command is required.
@@ -179,14 +179,14 @@ eSci2c_Error_t sci2c_Init(U8 *SCI2Catr, U16 *SCI2CatrLen)
     return eSci2c_No_Error;
 }
 
-void sci2c_SetSequenceCounter(U8 seqCounter)
+void sci2c_SetSequenceCounter(atomic_val_t seqCounter)
 {
-    gSeqCtr = seqCounter;
+    atomic_set(&gSeqCtr, seqCounter);
 }
 
-U8 sci2c_GetSequenceCounter()
+atomic_val_t sci2c_GetSequenceCounter()
 {
-    return gSeqCtr;
+    return atomic_get(&gSeqCtr);
 }
 
 /**
@@ -626,13 +626,13 @@ static eSci2c_Error_t sci2c_DataExchange(tSCI2C_Data_t * pSCI2C)
 
 
 /* -------------------------- local functions ----------------------------- */
-static U8 GetCounter(void)
+static atomic_val_t GetCounter(void)
 {
-   if (gSeqCtr >= 8)
+   if (atomic_get(&gSeqCtr) >= 8)
    {
-      gSeqCtr = 0;
+	   atomic_set(&gSeqCtr, 0);
    }
-   return gSeqCtr++;
+   return atomic_inc(&gSeqCtr);
 }
 
 /* sci2c_WaitForStatusOkay
