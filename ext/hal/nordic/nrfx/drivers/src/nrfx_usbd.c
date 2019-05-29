@@ -1745,6 +1745,22 @@ void nrfx_usbd_enable(void)
         NRFX_CRITICAL_SECTION_EXIT();
     }
     
+    if (nrfx_usbd_errata_171())
+    {
+        NRFX_CRITICAL_SECTION_ENTER();
+        if (*((volatile uint32_t *)(0x4006EC00)) == 0x00000000)
+        {
+            *((volatile uint32_t *)(0x4006EC00)) = 0x00009375;
+            *((volatile uint32_t *)(0x4006EC14)) = 0x000000C0;
+            *((volatile uint32_t *)(0x4006EC00)) = 0x00009375;
+        }
+        else
+        {
+            *((volatile uint32_t *)(0x4006EC14)) = 0x000000C0;
+        }
+        NRFX_CRITICAL_SECTION_EXIT();
+    }
+
     /* Enable the peripheral */
     nrf_usbd_enable();
     /* Waiting for peripheral to enable, this should take a few us */
@@ -1916,20 +1932,6 @@ bool nrfx_usbd_suspend(void)
             else
             {
                 suspended = true;
-
-                if (nrfx_usbd_errata_171())
-                {
-                    if (*((volatile uint32_t *)(0x4006EC00)) == 0x00000000)
-                    {
-                        *((volatile uint32_t *)(0x4006EC00)) = 0x00009375;
-                        *((volatile uint32_t *)(0x4006EC14)) = 0x00000000;
-                        *((volatile uint32_t *)(0x4006EC00)) = 0x00009375;
-                    }
-                    else
-                    {
-                        *((volatile uint32_t *)(0x4006EC14)) = 0x00000000;
-                    }
-                }
             }
         }
     }
