@@ -49,6 +49,8 @@ static const u32_t delays_standard[] = {
 	[T_HIGH] = NS_TO_SYS_CLOCK_HW_CYCLES(4000),
 };
 
+unsigned int irq_lock_key;
+
 int i2c_bitbang_configure(struct i2c_bitbang *context, u32_t dev_config)
 {
 	/* Check for features we don't support */
@@ -96,6 +98,7 @@ static int i2c_get_sda(struct i2c_bitbang *context)
 static void i2c_delay(unsigned int cycles_to_wait)
 {
 	u32_t start = k_cycle_get_32();
+	// cycles_to_wait = cycles_to_wait / 2;
 
 	/* Wait until the given number of cycles have passed */
 	while (k_cycle_get_32() - start < cycles_to_wait) {
@@ -210,9 +213,12 @@ int i2c_bitbang_transfer(struct i2c_bitbang *context,
 
 		/* Send address after any Start condition */
 		byte0 |= (flags & I2C_MSG_RW_MASK) == I2C_MSG_READ;
+		irq_lock_key = irq_lock();
 		if (!i2c_write_byte(context, byte0)) {
+			irq_unlock(irq_lock_key);
 			goto finish; /* No ACK received */
 		}
+		irq_unlock(irq_lock_key);
 
 		/* Transfer data */
 		buf = msgs->buf;
@@ -222,26 +228,34 @@ int i2c_bitbang_transfer(struct i2c_bitbang *context,
 			/* Some SMBus transactions require that we receive the
 			   transaction length as the first read byte. */
 			if ((buf == msgs->buf) && (flags & I2C_MSG_RECV_LEN)) {
+				irq_lock_key = irq_lock();
 				*buf++ = i2c_read_byte(context);
 				if (*(msgs->buf) > I2C_SMBUS_BLOCK_MAX) {
 					result = -EPROTO;
+					irq_unlock(irq_lock_key);
 					goto finish; /* invalid block length */
 				}
 				msgs->len = *(msgs->buf);
 				buf_end = buf + msgs->len;
 				i2c_write_bit(context, buf == buf_end);
+				irq_unlock(irq_lock_key);
 			}
 			while (buf < buf_end) {
+				irq_lock_key = irq_lock();
 				*buf++ = i2c_read_byte(context);
 				/* ACK the byte, except for the last one */
 				i2c_write_bit(context, buf == buf_end);
+				irq_unlock(irq_lock_key);
 			}
 		} else {
 			/* Write */
 			while (buf < buf_end) {
+				irq_lock_key = irq_lock();
 				if (!i2c_write_byte(context, *buf++)) {
+					irq_unlock(irq_lock_key);
 					goto finish; /* No ACK received */
 				}
+				irq_unlock(irq_lock_key);
 			}
 		}
 
